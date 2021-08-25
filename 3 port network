@@ -1,0 +1,104 @@
+# importing required libraries
+import netsquid as ns
+from netsquid.qubits.operators import *
+from netsquid.components import Channel, ClassicalChannel
+from netsquid.components.qchannel import QuantumChannel
+from netsquid.components.models.delaymodels import FixedDelayModel, GaussianDelayModel, FibreDelayModel
+from netsquid.components.models.qerrormodels import FibreLossModel, DepolarNoiseModel
+from netsquid.components import QuantumMemory
+from netsquid.qubits.qubitapi import create_qubits
+import netsquid.qubits.operators as ops
+from netsquid.components.component import Port
+from netsquid.nodes import Node
+from netsquid.nodes.connections import Connection
+from netsquid.qubits import StateSampler
+import netsquid.qubits.ketstates as ks
+
+
+#Creating noise models
+fixed_delaymodel = FixedDelayModel(delay=10)
+depolar_noise = DepolarNoiseModel(depolar_rate=1e6)
+loss_model = FibreLossModel(p_loss_init = 0.05, p_loss_length = 0.01)
+
+#Making Nodes
+esb = Node("ESB")
+research_park = Node("IITM_Research_Park")
+outside = Node("Outside")
+
+#Creating memory for the created nodes
+qmem_esb = QuantumMemory("ESB_Memory", num_positions=1,memory_noise_models = [depolar_noise])
+esb.add_subcomponent(qmem_esb, name="memoryA")
+
+qmem_research_park = QuantumMemory("Research_Park_Memory", num_positions=2,memory_noise_models = [depolar_noise]*2)
+research_park.add_subcomponent(qmem_research_park, name="memoryB")
+
+qmem_outside = QuantumMemory("Outside_Memory", num_positions=1,memory_noise_models = [depolar_noise])
+outside.add_subcomponent(qmem_outside, name="memoryC")
+
+#Node Ports
+esb.add_ports(['ESB2RPout','RP2ESBin'])
+research_park.add_ports(['RP2ESBout','ESB2RPin','RP2Oout','O2RPin'])
+outside.add_ports(['O2RPout','RP2Oin'])
+
+#Memory Ports
+# qmem_esb.add_ports(['ESB2RPoutMem','RP2ESBinMem'])
+# qmem_research_park.add_ports(['RP2ESBoutMem','ESB2RPinMem','RP2OoutMem','O2RPinMem'])
+# qmem_outside.add_ports(['O2RPoutMem','RP2OinMem'])
+
+#Forwarding i/o from node to memory
+esb.ports['RP2ESBin'].forward_input(qmem_esb.ports['qin'])
+qmem_esb.ports['qout'].forward_output(esb.ports['ESB2RPout'])
+#esb.ports['RP2ESBin'].forward_output(qmem_esb.ports['RP2ESBinMem'])
+
+research_park.ports['ESB2RPin'].forward_input(qmem_research_park.ports['qin0'])
+qmem_research_park.ports['qout'].forward_output(research_park.ports['RP2ESBout'])
+#research_park.ports['ESB2RPin'].forward_output(qmem_research_park.ports['ESB2RPinMem'])
+research_park.ports['O2RPin'].forward_input(qmem_research_park.ports['qin1'])
+qmem_research_park.ports['qout'].forward_output(research_park.ports['RP2Oout'])
+#research_park.ports['O2RPin'].forward_output(qmem_research_park.ports['O2RPinMem'])
+
+outside.ports['RP2Oin'].forward_input(qmem_outside.ports['qin'])
+qmem_outside.ports['qout'].forward_output(outside.ports['O2RPout'])
+#outside.ports['RP2Oin'].forward_output(qmem_outside.ports['RP2OinMem'])
+
+
+#Connection which sends ESB to RP
+qconnection1 = Connection("ESB2RP_Connection")
+qchannel1 = QuantumChannel("Channel_ESB2RP",length = 1, models = {'quantum_loss_model' : loss_model})
+
+#Connection which sends RP to ESB        
+qconnection2 = Connection("RP2ESB_Connection")
+qchannel2 = QuantumChannel("Channel_RP2ESB",length = 1, models = {'delay_model' : fixed_delaymodel,'quantum_loss_model' : loss_model})
+        
+#Connection which sends RP to O        
+qconnection3 = Connection("RP2O_Connection")
+qchannel3 = QuantumChannel("Channel_RP2O",length = 12, models = {'quantum_loss_model' : loss_model})
+        
+#Connection which sends O to RP        
+qconnection4 = Connection("O2RP_Connection")
+qchannel4 = QuantumChannel("Channel_O2RP",length = 12, models = {'delay_model' : fixed_delaymodel,'quantum_loss_model' : loss_model})
+
+qchannel1.ports['send'].connect(esb.ports['ESB2RPout'])
+qchannel1.ports['recv'].connect(research_park.ports['ESB2RPin'])
+qchannel2.ports['send'].connect(research_park.ports['RP2ESBout'])
+qchannel2.ports['recv'].connect(esb.ports['RP2ESBin'])
+qchannel3.ports['send'].connect(research_park.ports['RP2Oout'])
+qchannel3.ports['recv'].connect(outside.ports['RP2Oin'])
+qchannel4.ports['send'].connect(outside.ports['O2RPout'])
+qchannel4.ports['recv'].connect(research_park.ports['O2RPin'])
+
+#Creating qubit
+qubit_output = create_qubits(1)
+
+# myop = ns.H
+# ns.qubits.operate(qubit_output, myop)
+# print(qubit_output[0].qstate.qrepr)
+
+qchannel2.send(qubit_output)
+handler = lambda m : print(f"Node2 received {m} at {ns.sim_time()}!")
+qmem_esb.ports['qin'].bind_input_handler(handler)
+
+
+ns.sim_run()
+
+#print(qmem_research_park.peek(1)[0].qstate.qrepr)
