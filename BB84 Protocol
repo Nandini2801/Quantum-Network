@@ -1,1 +1,171 @@
+#importing required libraries
+import netsquid as ns
+from netsquid.components import Channel, ClassicalChannel
+from netsquid.components.qchannel import QuantumChannel
+from netsquid.components.models.delaymodels import FixedDelayModel, GaussianDelayModel, FibreDelayModel
+from netsquid.components.models.qerrormodels import FibreLossModel, DepolarNoiseModel
+from netsquid.components import QuantumMemory
+from netsquid.qubits.qubitapi import create_qubits
+import netsquid.qubits.operators as ops
+from netsquid.components.component import Port
+from netsquid.nodes import Node
+from netsquid.nodes.connections import Connection
+from netsquid.qubits import StateSampler
+import netsquid.qubits.ketstates as ks
+import numpy as np
+import random
+#import matplotlib.pyplot as graph
+
+def switcher(s):
+    if s == 0:
+        return ns.I
+    if s == 1:
+        return ns.X
+    if s == 2:
+        return ns.H
+    if s == 3:
+        return (ns.X - ns.Z)/np.sqrt(2)
+
+def basis(t):
+    if t == 0:
+        return ns.Z
+    if t == 1:
+        return ns.X
+
+print("Enter number of qubits to be transferred from Alice to Bob.")
+N = int(input())
+f = 5
+qloss_model = FibreLossModel(p_loss_init = 0.20, p_loss_length = 0.35)
+Qchannel_AB = QuantumChannel("Channel_Alice_to_Bob", length = 5, models = {'quantum_loss_model' : qloss_model}, delay = 3)
+Cchannel_BA = ClassicalChannel("Classical_Channel_Bob_to_Alice", length = 5, delay = 10)
+#d_noise = DepolarNoiseModel(depolar_rate = 0.1)
+#x = [0]*(N+1)
+#for i in range(N+1):
+#    x[i] = d_noise
+#dephase_noise = DephaseNoiseModel(
+qmem_Alice = QuantumMemory(name = "mem_Alice", num_positions = N + 1)
+qmem_Bob = QuantumMemory(name = "mem_Bob", num_positions = N + 1)
+Qchannel_AB.ports['send'].connect(qmem_Alice.ports['qout0'])
+Qchannel_AB.ports['recv'].connect(qmem_Bob.ports['qin0'])
+Cchannel_BA.ports['send'].connect(qmem_Bob.ports['qout0'])
+Cchannel_BA.ports['recv'].connect(qmem_Alice.ports['qin0'])
+B_pointer = int(-1)
+Alice_polz = [0]*N
+Alice_bits = [0]*N
+for j in range(N):
+    q1 = create_qubits(1)
+    s = random.choice([0,1,2,3])
+    if s == 0:
+        Alice_polz[j] = 'R'
+        Alice_bits[j] = [0]
+    if s == 1:
+        Alice_polz[j] = 'R'
+        Alice_bits[j] = [1]
+    if s == 2:
+        Alice_polz[j] = 'D'
+        Alice_bits[j] = [0]
+    if s == 3:
+        Alice_polz[j] = 'D'
+        Alice_bits[j] = [1]
+    ns.qubits.operate(q1, switcher(s))
+    print("Alice sent ", q1, " at t = ", ns.sim_time())
+    #print(q1[0].qstate.qrepr)
+    Qchannel_AB.send(q1) 
+    ns.sim_run()
+    B_pointer = B_pointer + 1
+    for u in range(B_pointer, -1, -1):
+        qmem_Bob.put(qmem_Bob.peek(u, skip_noise = True), positions = [u+1])
+        qmem_Bob.pop(positions = [u], skip_noise = True)
+    ns.sim_run(duration = (1/f))
+    #Qchannel_AB.peek(index = 0)
+
+
+Nr = int(0)
+qb = [0]*N
+for m in  range(N):
+    if qmem_Bob.peek(m+1, skip_noise = True) != [None]:
+        qb[Nr] = qmem_Bob.peek(m+1, skip_noise = True)
+        Nr = Nr + 1
+qbs = [0]*Nr
+for x in range(Nr):
+    qbs[x] = qb[x]
+qbs.reverse()
+AQM = QuantumMemory("actual_bits_recd_by_Bob", num_positions = Nr)
+for p in range(Nr):
+    AQM.put(qbs[p], positions = [p])
+
+Bob_bases = [0]*Nr
+Bob_bits = [0]*Nr
+Bob_polz = [0]*Nr
+
+mapper = [0]*Nr
+v = int(0)
+#print("What Bob has received : ")
+for k in range(N+1):
+   #print(qmem_Bob.peek(k))
+    if qmem_Bob.peek(N - k, skip_noise = True) != [None]:
+        mapper[v] = k
+        v = v + 1
+
+print("The qubits Bob received are : ")
+for s in range(Nr):
+    print(AQM.peek(s, skip_noise = True))
+    #print(AQM.peek(s)[0].qstate.qrepr)
+
+probab = [0]*Nr
+
+for h in range(Nr):
+    Bob_bases[h] = basis(random.choice([0,1]))
+    if Bob_bases[h] == ns.Z:
+        Bob_polz[h] = 'R'
+    if Bob_bases[h] == ns.X:
+        Bob_polz[h] = 'D'
+    Bob_bits[h], probab[h] = AQM.measure(positions = [h], observable = Bob_bases[h])
+
+
+print("Bits and Polarizations chose by Bob for the successfully received bits : ") 
+for c in range(Nr):
+    if c != Nr - 1:
+        print(Bob_polz[c], end = "     ")
+    else:
+        print(Bob_polz[c])
+for C in range(Nr):
+    if C != Nr - 1:
+        print(Bob_bits[C], end = "   ")
+    else:
+        print(Bob_bits[C])
+#print(probab)
+
+print("Bits and Polarizations chose by Alice for the successfully received bits : ") 
+for c in range(Nr):
+    if c != Nr - 1:
+        print(Alice_polz[mapper[c]], end = "     ")
+    else:
+        print(Alice_polz[mapper[c]])
+for C in range(Nr):
+    if C != Nr - 1:
+        print(Alice_bits[mapper[C]], end = "   ")
+    else:
+        print(Alice_bits[mapper[C]])
+
+n_public = int(Nr/3)
+comp = int(0)
+eavesdrop = int()
+print("First ", n_public, " out of ", Nr, " successfully received bits were made public and compared.")
+for y in range(n_public):
+    #print(Bob_bits[y], Alice_bits[y], Bob_polz[y], Alice_polz[y])
+    if Bob_polz[y] == Alice_polz[mapper[y]]:
+        if Bob_bits[y][0] == Alice_bits[mapper[y]][0]:
+            eavesdrop = int(0)
+        else:
+            eavesdrop = int(1)
+            break
+
+
+if eavesdrop == 1:
+    print("Eavesdropping was detected.")
+else:
+    print("No eavesdropping detected.")
+
+
 
