@@ -23,4 +23,4 @@ Due to the random mix of rectilinear and diagonal photons in the quantum transmi
 
 Alice and Bob can therefore test for eavesdropping by publicly comparing some of the bits on which they think they should agree, though, of course, this sacrifices the secrecy of these bits. The bit positions used in this comparison should be a random subset (say one-third) of the correctly received bits so that eavesdropping on more than a few photons is unlikely to escape detection. If it agrees, Alice and Bob can conclude that the quantum transmission is free of significant eavesdropping; and those of the remaining bits that were sent and received with the same basis also agree and can safely be used as a one-time pad for subsequent secure communications over the public channel. When this one-time pad is used up, the protocol is repeated to send a new body of random information over the quantum channel. 
 
-![image](https://drive.google.com/file/d/1xOywLUMDYlNuR0pz_wclf35jG3lskyp8/view?usp=sharing)
+![image](quantum.png)
